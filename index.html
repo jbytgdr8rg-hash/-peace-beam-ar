@@ -1,0 +1,600 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Peace Beam Invaders v8</title>
+<style>
+:root{
+  --bg:#02040a;--panel:rgba(8,13,22,.76);--line:rgba(255,255,255,.14);
+  --ink:#edf7ff;--muted:#9fb0c2;--cyan:#72e7ff;--green:#99ffc7;--pink:#ff7ae6;
+  --yellow:#ffe37a;--red:#ff7777;--blue:#7aa8ff;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{
+  margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic","Noto Sans JP",system-ui,sans-serif;
+}
+#stage{position:fixed;inset:0;background:#000}
+video,canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none}
+video{background:#000;transform:scaleX(-1)}
+#game{z-index:2}
+#fx{z-index:3}
+.glass{border:1px solid var(--line);background:var(--panel);backdrop-filter:blur(14px);box-shadow:0 16px 48px rgba(0,0,0,.34)}
+#hud{
+  position:fixed;z-index:5;left:10px;right:10px;top:calc(10px + env(safe-area-inset-top));
+  display:grid;grid-template-columns:repeat(4,1fr);gap:8px;pointer-events:none;
+}
+.pill{border-radius:14px;padding:8px 10px;font-size:12px;line-height:1.25;min-width:0}
+.pill b{display:block;color:var(--cyan);font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pill span{color:var(--muted);font-size:11px}
+#debug{
+  position:fixed;z-index:5;left:12px;bottom:calc(78px + env(safe-area-inset-bottom));
+  width:min(680px,calc(100% - 24px));border-radius:16px;padding:10px 12px;
+  color:#dcecff;font-size:12px;line-height:1.55;pointer-events:none;white-space:pre-wrap;
+}
+#controls{
+  position:fixed;z-index:6;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));
+  display:flex;gap:8px;justify-content:center;flex-wrap:wrap;pointer-events:auto;
+}
+button{
+  appearance:none;border:1px solid var(--line);background:rgba(13,20,31,.90);color:var(--ink);
+  border-radius:14px;padding:10px 12px;min-height:44px;font-size:14px;font-weight:750;
+  touch-action:manipulation;user-select:none;box-shadow:0 14px 36px rgba(0,0,0,.32);
+}
+button.primary{background:linear-gradient(135deg,rgba(114,231,255,.30),rgba(122,168,255,.22));border-color:rgba(114,231,255,.44)}
+button.good{background:rgba(153,255,199,.13);border-color:rgba(153,255,199,.35)}
+button.bomb{background:rgba(255,227,122,.15);border-color:rgba(255,227,122,.38)}
+button.warn{background:rgba(255,119,119,.15);border-color:rgba(255,119,119,.35)}
+button:disabled{opacity:.45}
+#startLayer,#gameOverLayer{
+  position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;
+  background:radial-gradient(circle at 50% 12%,rgba(114,231,255,.18),transparent 34%),
+             linear-gradient(180deg,rgba(2,5,10,.72),rgba(2,5,10,.96));
+}
+#gameOverLayer{display:none;z-index:9998}
+.card{width:min(760px,100%);border-radius:24px;padding:22px}
+h1{margin:0 0 8px;font-size:28px;letter-spacing:-.04em}
+h2{margin:0 0 8px;font-size:25px;letter-spacing:-.03em}
+p{margin:0 0 14px;color:var(--muted);font-size:14px;line-height:1.7}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:14px 0 16px}
+.tile{border:1px solid var(--line);background:rgba(255,255,255,.035);border-radius:16px;padding:12px;min-height:92px}
+.tile b{display:block;color:var(--cyan);margin-bottom:6px}.tile span{display:block;color:var(--muted);font-size:12px;line-height:1.45}
+#startBtn,#restartBtn{width:100%;font-size:16px;padding:15px 18px;border-radius:16px}
+#startStatus{min-height:22px;margin-top:12px;color:var(--cyan);font-size:13px;line-height:1.55;white-space:pre-wrap}
+#errorBox{
+  display:none;margin-top:12px;border:1px solid rgba(255,119,119,.36);background:rgba(255,119,119,.12);
+  color:#ffd7d7;border-radius:14px;padding:12px;font-size:13px;line-height:1.55;white-space:pre-wrap;max-height:190px;overflow:auto
+}
+#logPanel{
+  position:fixed;z-index:7;right:12px;top:calc(92px + env(safe-area-inset-top));
+  width:min(500px,calc(100% - 24px));max-height:44vh;overflow:auto;border-radius:16px;
+  padding:11px 12px;font-size:11px;line-height:1.5;color:#cfe7ff;white-space:pre-wrap;display:none;
+}
+.scoreRows{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:16px 0}
+.scoreBox{border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.035);padding:12px}
+.scoreBox b{font-size:24px;color:var(--green)}.scoreBox span{display:block;color:var(--muted);font-size:12px;margin-top:4px}
+.notice{color:var(--yellow)}
+@media(max-width:680px){
+  #hud{grid-template-columns:repeat(2,1fr)}
+  .grid,.scoreRows{grid-template-columns:1fr}
+  h1{font-size:24px}h2{font-size:23px}
+  #controls{justify-content:stretch}
+  #controls button{flex:1 1 auto}
+  #debug{font-size:11px;bottom:calc(124px + env(safe-area-inset-bottom))}
+}
+</style>
+</head>
+<body>
+<div id="stage">
+  <video id="video" playsinline muted></video>
+  <canvas id="game"></canvas>
+  <canvas id="fx"></canvas>
+</div>
+
+<div id="hud">
+  <div class="pill glass"><span>SCORE</span><b id="scoreText">0</b></div>
+  <div class="pill glass"><span>LIFE</span><b id="lifeText">3</b></div>
+  <div class="pill glass"><span>BOMB</span><b id="bombText">READY</b></div>
+  <div class="pill glass"><span>STATE</span><b id="stateText">待機中</b></div>
+</div>
+
+<div id="debug" class="glass">未起動。ピースでビーーー、親指で30秒爆弾。まずは「ビームテスト」で演出を確認できます。</div>
+<div id="logPanel" class="glass"></div>
+
+<div id="controls">
+  <button id="testBtn" type="button" class="primary">ビームテスト</button>
+  <button id="bombBtn" type="button" class="bomb">爆弾テスト</button>
+  <button id="soundBtn" type="button">音を有効化</button>
+  <button id="logBtn" type="button">診断ログ</button>
+  <button id="switchBtn" type="button" disabled>カメラ切替</button>
+  <button id="restartSmallBtn" type="button" class="good">リスタート</button>
+  <button id="stopBtn" type="button" class="warn" disabled>停止</button>
+</div>
+
+<div id="startLayer">
+  <div class="card glass">
+    <h1>Peace Beam Invaders v8</h1>
+    <p>ピースでビーム、親指で30秒に1回の全画面爆弾。ゆっくり迫るインベーダーが防衛ラインを越えるとライフが減り、ライフ0でゲームオーバーです。</p>
+    <div class="grid">
+      <div class="tile"><b>ピース</b><span>人差し指と中指を伸ばす。ビーーー音つきビームで敵を撃破。</span></div>
+      <div class="tile"><b>親指</b><span>親指を立てる。30秒に1回、画面内の全マトを破壊。</span></div>
+      <div class="tile"><b>スコア</b><span>撃破、コンボ、爆弾撃破を記録。ベストスコアは端末内保存。</span></div>
+    </div>
+    <button id="startBtn" type="button" class="primary">カメラを開始してゲーム開始</button>
+    <div id="startStatus">GitHub Pagesの https://...github.io/... URLで開いてください。file://だとモデル読込が落ちます。</div>
+    <div id="errorBox"></div>
+  </div>
+</div>
+
+<div id="gameOverLayer">
+  <div class="card glass">
+    <h2>GAME OVER</h2>
+    <p>インベーダーが防衛ラインを突破しました。ゲームは冷酷です。ビームは優しいのに。</p>
+    <div class="scoreRows">
+      <div class="scoreBox"><b id="finalScoreText">0</b><span>今回のスコア</span></div>
+      <div class="scoreBox"><b id="bestScoreText">0</b><span>ベストスコア</span></div>
+      <div class="scoreBox"><b id="waveText">1</b><span>到達ウェーブ</span></div>
+    </div>
+    <button id="restartBtn" type="button" class="primary">もう一回</button>
+  </div>
+</div>
+
+<script>
+(() => {
+'use strict';
+
+const video=document.getElementById('video');
+const gameCanvas=document.getElementById('game'),gctx=gameCanvas.getContext('2d',{alpha:true});
+const fxCanvas=document.getElementById('fx'),fctx=fxCanvas.getContext('2d',{alpha:true});
+
+const startLayer=document.getElementById('startLayer'),gameOverLayer=document.getElementById('gameOverLayer');
+const startBtn=document.getElementById('startBtn'),restartBtn=document.getElementById('restartBtn'),restartSmallBtn=document.getElementById('restartSmallBtn');
+const testBtn=document.getElementById('testBtn'),bombBtn=document.getElementById('bombBtn'),soundBtn=document.getElementById('soundBtn'),logBtn=document.getElementById('logBtn'),switchBtn=document.getElementById('switchBtn'),stopBtn=document.getElementById('stopBtn');
+const scoreText=document.getElementById('scoreText'),lifeText=document.getElementById('lifeText'),bombText=document.getElementById('bombText'),stateText=document.getElementById('stateText');
+const debug=document.getElementById('debug'),logPanel=document.getElementById('logPanel'),startStatus=document.getElementById('startStatus'),errorBox=document.getElementById('errorBox');
+const finalScoreText=document.getElementById('finalScoreText'),bestScoreText=document.getElementById('bestScoreText'),waveText=document.getElementById('waveText');
+
+const TASK_IMPORTS=[
+ 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/vision_bundle.mjs',
+ 'https://unpkg.com/@mediapipe/tasks-vision@0.10.22/vision_bundle.mjs'
+];
+const WASM_BASES=[
+ 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm',
+ 'https://unpkg.com/@mediapipe/tasks-vision@0.10.22/wasm'
+];
+const MODEL_URLS=[
+ 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+ 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/full/1/hand_landmarker.task'
+];
+
+let stream=null,facingMode='user',mirrored=true,running=false,startInProgress=false,detecting=false,modelLoading=false;
+let HandLandmarker=null,FilesetResolver=null,handLandmarker=null,legacyHands=null,modelMode='none';
+let audioCtx=null,lastResultAt=0,lastBeamAt=0,lastBombAt=-30000,stablePeace=0,stableThumb=0,lastHandPoint=null;
+
+let score=0,bestScore=Number(localStorage.getItem('peaceBeamInvadersBest')||0),lives=3,wave=1,combo=0,gameActive=false,gameOver=false;
+let invaders=[],nextInvaderId=1;
+const beams=[],sparks=[],rings=[],explosions=[];
+const logs=[];
+
+function log(msg){const line='['+new Date().toLocaleTimeString()+'] '+msg;logs.push(line);if(logs.length>100)logs.shift();logPanel.textContent=logs.join('\n');console.log(line)}
+function setDebug(t){debug.textContent=t}
+function setStartStatus(t){startStatus.textContent=t||''}
+function clearError(){errorBox.style.display='none';errorBox.textContent=''}
+function showError(t){errorBox.style.display='block';errorBox.textContent=t}
+function setStartLoading(v){startBtn.disabled=!!v;startBtn.textContent=v?'起動中…':'カメラを開始してゲーム開始'}
+function withTimeout(promise,ms,label){let timer;const timeout=new Promise((_,rej)=>{timer=setTimeout(()=>rej(new Error(label+' がタイムアウトしました。')),ms)});return Promise.race([promise,timeout]).finally(()=>clearTimeout(timer))}
+function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
+
+function resizeCanvas(){
+  const dpr=Math.min(devicePixelRatio||1,2),w=Math.floor(innerWidth*dpr),h=Math.floor(innerHeight*dpr);
+  for(const [c,ctx] of [[gameCanvas,gctx],[fxCanvas,fctx]]){
+    if(c.width!==w||c.height!==h){
+      c.width=w;c.height=h;c.style.width=innerWidth+'px';c.style.height=innerHeight+'px';ctx.setTransform(dpr,0,0,dpr,0,0);
+    }
+  }
+}
+
+function updateHud(){
+  scoreText.textContent=score;
+  lifeText.textContent='♥'.repeat(Math.max(0,lives)) || '0';
+  const remain=Math.max(0,30000-(performance.now()-lastBombAt));
+  bombText.textContent=remain<=0?'READY':Math.ceil(remain/1000)+'s';
+}
+
+function ensureAudio(){
+  try{
+    const AC=window.AudioContext||window.webkitAudioContext;
+    if(!AC)return null;
+    if(!audioCtx)audioCtx=new AC();
+    if(audioCtx.state==='suspended')audioCtx.resume();
+    return audioCtx;
+  }catch(e){log('Audio failed: '+(e.message||e));return null}
+}
+
+function playBeamSound(power=1){
+  const ac=ensureAudio();if(!ac)return;
+  const t=ac.currentTime,dur=.72;
+  const out=ac.createGain();
+  out.gain.setValueAtTime(.0001,t);
+  out.gain.linearRampToValueAtTime(.18*power,t+.08);
+  out.gain.setValueAtTime(.18*power,t+dur-.12);
+  out.gain.exponentialRampToValueAtTime(.0001,t+dur);
+  out.connect(ac.destination);
+
+  const osc=ac.createOscillator();
+  const vib=ac.createOscillator();
+  const vibGain=ac.createGain();
+  const filter=ac.createBiquadFilter();
+  osc.type='sawtooth';
+  osc.frequency.setValueAtTime(520,t);
+  osc.frequency.linearRampToValueAtTime(760,t+.12);
+  osc.frequency.setValueAtTime(760,t+dur-.18);
+  osc.frequency.exponentialRampToValueAtTime(430,t+dur);
+  vib.type='sine';vib.frequency.setValueAtTime(8,t);
+  vibGain.gain.setValueAtTime(22,t);
+  vib.connect(vibGain).connect(osc.frequency);
+  filter.type='lowpass';filter.frequency.setValueAtTime(1800,t);filter.Q.setValueAtTime(7,t);
+  osc.connect(filter).connect(out);
+  osc.start(t);vib.start(t);osc.stop(t+dur+.02);vib.stop(t+dur+.02);
+
+  const osc2=ac.createOscillator(),g2=ac.createGain();
+  osc2.type='sine';
+  osc2.frequency.setValueAtTime(1040,t);
+  osc2.frequency.setValueAtTime(1180,t+.22);
+  g2.gain.setValueAtTime(.055*power,t+.05);
+  g2.gain.exponentialRampToValueAtTime(.0001,t+dur);
+  osc2.connect(g2).connect(out);osc2.start(t+.02);osc2.stop(t+dur);
+}
+
+function playExplosionSound(){
+  const ac=ensureAudio();if(!ac)return;
+  const t=ac.currentTime,out=ac.createGain();out.gain.setValueAtTime(.18,t);out.gain.exponentialRampToValueAtTime(.0001,t+.42);out.connect(ac.destination);
+  const size=Math.floor(ac.sampleRate*.28),buf=ac.createBuffer(1,size,ac.sampleRate),data=buf.getChannelData(0);
+  for(let i=0;i<size;i++){const p=i/size;data[i]=(Math.random()*2-1)*Math.pow(1-p,3)}
+  const noise=ac.createBufferSource();noise.buffer=buf;
+  const filter=ac.createBiquadFilter();filter.type='lowpass';filter.frequency.setValueAtTime(900,t);filter.frequency.exponentialRampToValueAtTime(120,t+.35);
+  noise.connect(filter).connect(out);noise.start(t);noise.stop(t+.3);
+}
+
+function playBombSound(){
+  const ac=ensureAudio();if(!ac)return;
+  const t=ac.currentTime,out=ac.createGain();out.gain.setValueAtTime(.0001,t);out.gain.linearRampToValueAtTime(.28,t+.05);out.gain.exponentialRampToValueAtTime(.0001,t+.95);out.connect(ac.destination);
+  const osc=ac.createOscillator();osc.type='sawtooth';osc.frequency.setValueAtTime(120,t);osc.frequency.exponentialRampToValueAtTime(38,t+.85);osc.connect(out);osc.start(t);osc.stop(t+.95);
+}
+
+function mapPoint(p){return{x:(mirrored?(1-p.x):p.x)*innerWidth,y:p.y*innerHeight}}
+function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y)}
+function isExtended(lm,tip,pip,mcp){const w=lm[0],td=dist(lm[tip],w),pd=dist(lm[pip],w),md=dist(lm[mcp],w);return td>pd*1.03&&td>md*1.20}
+function isCurled(lm,tip,pip,mcp){const w=lm[0],td=dist(lm[tip],w),pd=dist(lm[pip],w);return td<pd*1.05 || td<dist(lm[mcp],w)*1.24}
+function isThumbExtended(lm){
+  const w=lm[0],tip=lm[4],ip=lm[3],mcp=lm[2];
+  return dist(tip,w)>dist(ip,w)*1.08 && dist(tip,w)>dist(mcp,w)*1.35 && dist(tip,lm[9])>dist(ip,lm[9])*1.05;
+}
+function detectGestures(lm){
+  const idx=isExtended(lm,8,6,5),mid=isExtended(lm,12,10,9),ring=isExtended(lm,16,14,13),pinky=isExtended(lm,20,18,17);
+  const spread=dist(lm[8],lm[12])>Math.max(16,dist(lm[5],lm[17])*.13);
+  const peace=idx&&mid&&spread&&!(ring&&pinky);
+  const thumb=isThumbExtended(lm)&&isCurled(lm,8,6,5)&&isCurled(lm,12,10,9)&&isCurled(lm,16,14,13)&&isCurled(lm,20,18,17);
+  return{peace,thumb,idx,mid,ring,pinky,spread};
+}
+function processLandmarks(raw){
+  const lm=raw.map(mapPoint),g=detectGestures(lm),w=lm[0],o={x:(lm[8].x+lm[12].x)/2,y:(lm[8].y+lm[12].y)/2},angle=Math.atan2(o.y-w.y,o.x-w.x);
+  lastHandPoint={origin:o,wrist:w,lm,angle,peace:g.peace,thumb:g.thumb};lastResultAt=performance.now();
+
+  if(g.peace){stablePeace++;stableThumb=0}else if(g.thumb){stableThumb++;stablePeace=0}else{stablePeace=Math.max(0,stablePeace-1);stableThumb=Math.max(0,stableThumb-1)}
+
+  const now=performance.now();
+  if(g.peace){
+    setDebug(`ピース判定 ${stablePeace}/3：ビーム準備\nmodel:${modelMode} index:${g.idx} middle:${g.mid} spread:${g.spread}`);
+  }else if(g.thumb){
+    const remain=Math.max(0,Math.ceil((30000-(now-lastBombAt))/1000));
+    setDebug(`親指判定 ${stableThumb}/5：爆弾準備 ${remain?remain+'秒待ち':'READY'}`);
+  }else{
+    setDebug(`手検出。ピースまたは親指を見せてください。\nindex:${g.idx} middle:${g.mid} ring:${g.ring} pinky:${g.pinky}`);
+  }
+
+  if(gameActive && stablePeace>=3 && now-lastBeamAt>430){
+    fireBeam(o.x,o.y,angle,1);
+    stablePeace=0;lastBeamAt=now;stateText.textContent='ビーーー';
+  }
+  if(gameActive && stableThumb>=5 && now-lastBombAt>=30000){
+    triggerBomb();
+    stableThumb=0;lastBombAt=now;stateText.textContent='BOMB';
+  }
+}
+
+function spawnWave(){
+  invaders=[];
+  const cols=clamp(4+Math.floor(wave/2),4,8);
+  const rows=clamp(2+Math.floor(wave/3),2,4);
+  const marginX=40,gapX=(innerWidth-marginX*2)/cols;
+  const size=clamp(Math.min(gapX*.58,48),28,52);
+  for(let r=0;r<rows;r++){
+    for(let c=0;c<cols;c++){
+      invaders.push({
+        id:nextInvaderId++,x:marginX+gapX*(c+.5),y:90+r*(size+18),w:size*1.12,h:size,
+        vx:(wave%2?1:-1)*(10+wave*1.5),vy:4+wave*.9,alive:true,phase:Math.random()*Math.PI*2,hp:1
+      });
+    }
+  }
+}
+
+function resetGame(){
+  score=0;lives=3;wave=1;combo=0;gameActive=true;gameOver=false;
+  lastBombAt=performance.now()-30000;
+  beams.length=sparks.length=rings.length=explosions.length=0;
+  spawnWave();gameOverLayer.style.display='none';updateHud();stateText.textContent='READY';
+}
+
+function endGame(){
+  if(gameOver)return;
+  gameActive=false;gameOver=true;running=running; // keep camera alive
+  bestScore=Math.max(bestScore,score);
+  localStorage.setItem('peaceBeamInvadersBest',String(bestScore));
+  const records=JSON.parse(localStorage.getItem('peaceBeamInvadersScores')||'[]');
+  records.unshift({score,wave,date:new Date().toISOString()});
+  localStorage.setItem('peaceBeamInvadersScores',JSON.stringify(records.slice(0,10)));
+  finalScoreText.textContent=score;bestScoreText.textContent=bestScore;waveText.textContent=wave;
+  gameOverLayer.style.display='flex';stateText.textContent='GAME OVER';
+}
+
+function addScore(points){
+  combo++;
+  score+=points+Math.min(combo*5,100);
+}
+
+function killInvader(inv, reason='beam'){
+  if(!inv.alive)return;
+  inv.alive=false;
+  explosions.push({x:inv.x,y:inv.y,born:performance.now(),duration:520,scale:reason==='bomb'?1.35:1});
+  addScore(reason==='bomb'?80:100);
+}
+
+function triggerBomb(){
+  const alive=invaders.filter(v=>v.alive);
+  if(!alive.length)return;
+  lastBombAt=performance.now();
+  for(const inv of alive)killInvader(inv,'bomb');
+  rings.push({x:innerWidth/2,y:innerHeight/2,power:4,born:performance.now(),duration:820,screen:true});
+  playBombSound();
+  setDebug(`爆弾発動。画面内の敵 ${alive.length} 体を破壊。次の爆弾まで30秒。`);
+}
+
+function lineCircleHit(x1,y1,x2,y2,cx,cy,r){
+  const dx=x2-x1,dy=y2-y1,len2=dx*dx+dy*dy;
+  let t=((cx-x1)*dx+(cy-y1)*dy)/len2;t=clamp(t,0,1);
+  const px=x1+t*dx,py=y1+t*dy;
+  return Math.hypot(cx-px,cy-py)<=r;
+}
+
+function fireBeam(x,y,angle,power=1){
+  const now=performance.now(),len=Math.max(innerWidth,innerHeight)*1.45,x2=x+Math.cos(angle)*len,y2=y+Math.sin(angle)*len;
+  beams.push({x,y,angle,power,len,born:now,duration:760,wobble:Math.random()*Math.PI*2});
+  rings.push({x,y,power,born:now,duration:360});
+  for(let i=0;i<22;i++){
+    const a=angle+Math.PI+(Math.random()-.5)*1.7,sp=90+Math.random()*280;
+    sparks.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,born:now,duration:360+Math.random()*280,r:1.4+Math.random()*3.8});
+  }
+  playBeamSound(power);
+  let hits=0;
+  if(gameActive){
+    for(const inv of invaders){
+      if(!inv.alive)continue;
+      if(lineCircleHit(x,y,x2,y2,inv.x,inv.y,Math.max(inv.w,inv.h)*.62)){
+        killInvader(inv,'beam');hits++;
+      }
+    }
+    if(!hits)combo=0;
+  }
+}
+
+function updateGame(dt){
+  if(!gameActive)return;
+  let alive=0;
+  const boundary=innerHeight-92;
+  for(const inv of invaders){
+    if(!inv.alive)continue;
+    alive++;
+    inv.phase+=dt*3;
+    inv.x+=inv.vx*dt;
+    inv.y+=inv.vy*dt;
+    if(inv.x<26||inv.x>innerWidth-26){inv.vx*=-1;inv.y+=14+wave*.4}
+    if(inv.y+inv.h*.5>=boundary){
+      inv.alive=false;
+      lives--;
+      combo=0;
+      explosions.push({x:inv.x,y:boundary,born:performance.now(),duration:620,scale:1.2,red:true});
+      playExplosionSound();
+      if(lives<=0){endGame();return}
+    }
+  }
+  if(alive===0){
+    wave++;
+    combo+=3;
+    score+=250+wave*25;
+    spawnWave();
+  }
+}
+
+function drawInvader(inv){
+  const x=inv.x,y=inv.y,w=inv.w,h=inv.h,t=performance.now()/1000+inv.phase;
+  gctx.save();
+  gctx.translate(x,y+Math.sin(t*2)*2);
+  gctx.globalAlpha=inv.alive?1:.18;
+  gctx.fillStyle='rgba(153,255,199,.92)';
+  gctx.shadowColor='rgba(153,255,199,.7)';
+  gctx.shadowBlur=12;
+  const px=w/8,py=h/7;
+  function rect(cx,cy,cw,ch){gctx.fillRect(-w/2+cx*px,-h/2+cy*py,cw*px,ch*py)}
+  rect(2,0,4,1);rect(1,1,6,1);rect(0,2,8,3);rect(1,5,2,1);rect(5,5,2,1);rect(0,6,1,1);rect(3,6,2,1);rect(7,6,1,1);
+  gctx.fillStyle='rgba(2,5,10,.95)';
+  rect(2,2,1,1);rect(5,2,1,1);
+  gctx.restore();
+}
+
+function drawGame(){
+  gctx.clearRect(0,0,innerWidth,innerHeight);
+  gctx.save();
+  const lineY=innerHeight-92;
+  gctx.strokeStyle='rgba(255,119,119,.55)';
+  gctx.lineWidth=2;
+  gctx.setLineDash([10,8]);
+  gctx.beginPath();gctx.moveTo(0,lineY);gctx.lineTo(innerWidth,lineY);gctx.stroke();
+  gctx.setLineDash([]);
+  gctx.fillStyle='rgba(255,119,119,.70)';
+  gctx.font='12px system-ui,-apple-system,sans-serif';
+  gctx.fillText('DEFENSE LINE',12,lineY-8);
+  gctx.restore();
+  for(const inv of invaders)if(inv.alive)drawInvader(inv);
+}
+
+function drawBeam(b,now){
+  const t=(now-b.born)/b.duration;if(t<0||t>1)return false;
+  const fade=1-t,grow=Math.min(1,t*3.2),len=b.len*grow,x2=b.x+Math.cos(b.angle)*len,y2=b.y+Math.sin(b.angle)*len,side=Math.sin(now*.025+b.wobble)*5;
+  fctx.save();fctx.globalCompositeOperation='lighter';fctx.lineCap='round';
+  fctx.shadowColor='rgba(114,231,255,.98)';fctx.shadowBlur=38;
+  fctx.strokeStyle=`rgba(114,231,255,${.32*fade})`;fctx.lineWidth=48*fade*b.power;fctx.beginPath();fctx.moveTo(b.x,b.y);fctx.lineTo(x2+side,y2-side);fctx.stroke();
+  fctx.strokeStyle=`rgba(122,168,255,${.82*fade})`;fctx.lineWidth=18*fade*b.power;fctx.shadowBlur=24;fctx.beginPath();fctx.moveTo(b.x,b.y);fctx.lineTo(x2,y2);fctx.stroke();
+  fctx.strokeStyle=`rgba(255,255,255,${.98*fade})`;fctx.lineWidth=5.5*fade*b.power;fctx.shadowBlur=10;fctx.beginPath();fctx.moveTo(b.x,b.y);fctx.lineTo(x2,y2);fctx.stroke();
+  fctx.restore();return true;
+}
+function drawRing(r,now){
+  const t=(now-r.born)/r.duration;if(t<0||t>1)return false;
+  const a=1-t,rad=(r.screen?Math.max(innerWidth,innerHeight)*t:12+t*78*r.power);
+  fctx.save();fctx.globalCompositeOperation='lighter';fctx.strokeStyle=r.screen?`rgba(255,227,122,${a*.85})`:`rgba(114,231,255,${a*.78})`;fctx.lineWidth=(r.screen?12:4)*a;fctx.shadowColor=r.screen?'rgba(255,227,122,.95)':'rgba(114,231,255,.95)';fctx.shadowBlur=28;
+  fctx.beginPath();fctx.arc(r.x,r.y,rad,0,Math.PI*2);fctx.stroke();fctx.restore();return true;
+}
+function drawSpark(s,now,dt){
+  const t=(now-s.born)/s.duration;if(t<0||t>1)return false;
+  s.x+=s.vx*dt;s.y+=s.vy*dt;s.vx*=.985;s.vy=s.vy*.985+26*dt;const a=1-t;
+  fctx.save();fctx.globalCompositeOperation='lighter';fctx.fillStyle=`rgba(255,227,122,${a})`;fctx.shadowColor='rgba(255,227,122,.9)';fctx.shadowBlur=12;fctx.beginPath();fctx.arc(s.x,s.y,s.r*a,0,Math.PI*2);fctx.fill();fctx.restore();return true;
+}
+function drawExplosion(e,now){
+  const t=(now-e.born)/e.duration;if(t<0||t>1)return false;
+  const a=1-t,rad=(12+t*54)*e.scale;
+  fctx.save();fctx.globalCompositeOperation='lighter';fctx.strokeStyle=e.red?`rgba(255,119,119,${a})`:`rgba(255,227,122,${a})`;fctx.lineWidth=5*a;fctx.shadowColor=e.red?'rgba(255,119,119,.9)':'rgba(255,227,122,.9)';fctx.shadowBlur=22;fctx.beginPath();fctx.arc(e.x,e.y,rad,0,Math.PI*2);fctx.stroke();
+  fctx.fillStyle=e.red?`rgba(255,119,119,${a*.24})`:`rgba(153,255,199,${a*.22})`;fctx.beginPath();fctx.arc(e.x,e.y,rad*.55,0,Math.PI*2);fctx.fill();fctx.restore();return true;
+}
+function drawHandAim(now){
+  if(!lastHandPoint||now-lastResultAt>900)return;
+  const {origin,wrist,lm,peace,thumb}=lastHandPoint;
+  fctx.save();fctx.globalCompositeOperation='lighter';fctx.lineCap='round';
+  fctx.strokeStyle=peace?'rgba(153,255,199,.72)':thumb?'rgba(255,227,122,.70)':'rgba(114,231,255,.36)';
+  fctx.lineWidth=2.6;fctx.beginPath();fctx.moveTo(wrist.x,wrist.y);fctx.lineTo(origin.x,origin.y);fctx.stroke();
+  fctx.fillStyle=peace?'rgba(153,255,199,.94)':thumb?'rgba(255,227,122,.92)':'rgba(114,231,255,.64)';
+  [4,8,12].forEach(i=>{fctx.beginPath();fctx.arc(lm[i].x,lm[i].y, i===4?6:7,0,Math.PI*2);fctx.fill()});
+  fctx.restore();
+}
+
+let lastFrame=performance.now();
+function animate(){
+  resizeCanvas();
+  const now=performance.now(),dt=Math.min(.033,(now-lastFrame)/1000);lastFrame=now;
+  if(gameActive)updateGame(dt);
+  drawGame();
+  fctx.clearRect(0,0,innerWidth,innerHeight);
+  drawHandAim(now);
+  for(let i=beams.length-1;i>=0;i--)if(!drawBeam(beams[i],now))beams.splice(i,1);
+  for(let i=rings.length-1;i>=0;i--)if(!drawRing(rings[i],now))rings.splice(i,1);
+  for(let i=sparks.length-1;i>=0;i--)if(!drawSpark(sparks[i],now,dt))sparks.splice(i,1);
+  for(let i=explosions.length-1;i>=0;i--)if(!drawExplosion(explosions[i],now))explosions.splice(i,1);
+  updateHud();
+  requestAnimationFrame(animate);
+}
+
+async function importWithTimeout(url,ms=12000){return await Promise.race([import(url),new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout after '+ms+'ms')),ms))])}
+function assertHttpsForModule(){
+  if(location.protocol==='file:')throw new Error('現在 protocol=file: で開いています。GitHub Pagesの https://...github.io/... URLを直接開いてください。file://ではMediaPipeのES module読込が失敗します。');
+}
+async function createTaskVisionModel(){
+  const failures=[];assertHttpsForModule();
+  for(const url of TASK_IMPORTS){
+    try{log('Trying module import: '+url);const mod=await importWithTimeout(url,14000);HandLandmarker=mod.HandLandmarker;FilesetResolver=mod.FilesetResolver;if(!HandLandmarker||!FilesetResolver)throw new Error('missing exports');log('Module OK: '+url);break}
+    catch(e){failures.push(`MODULE ${url}\n  ${e.message||e}`);log('Module failed: '+url+' / '+(e.message||e))}
+  }
+  if(!HandLandmarker||!FilesetResolver)throw new Error('tasks-vision module import failed.\n\n'+failures.join('\n\n'));
+  for(const wasm of WASM_BASES)for(const model of MODEL_URLS){
+    try{log('Trying wasm/model: '+wasm+' / '+model);const vision=await withTimeout(FilesetResolver.forVisionTasks(wasm),16000,'FilesetResolver');handLandmarker=await withTimeout(HandLandmarker.createFromOptions(vision,{baseOptions:{modelAssetPath:model,delegate:'GPU'},runningMode:'VIDEO',numHands:1,minHandDetectionConfidence:.45,minHandPresenceConfidence:.45,minTrackingConfidence:.45}),22000,'createFromOptions');modelMode='tasks-vision';log('TaskVision model OK');return}
+    catch(e){failures.push(`WASM/MODEL ${wasm}\n${model}\n  ${e.message||e}`);log('wasm/model failed: '+(e.message||e))}
+  }
+  throw new Error('HandLandmarker creation failed.\n\n'+failures.join('\n\n'));
+}
+function loadScript(url,ms=15000){return new Promise((resolve,reject)=>{const s=document.createElement('script');const timer=setTimeout(()=>reject(new Error('script timeout')),ms);s.src=url;s.async=true;s.onload=()=>{clearTimeout(timer);resolve()};s.onerror=()=>{clearTimeout(timer);reject(new Error('script error'))};document.head.appendChild(s)})}
+async function createLegacyHandsFallback(){
+  log('Trying legacy @mediapipe/hands fallback');
+  if(!window.Hands)await loadScript('https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js',15000);
+  if(!window.Hands)throw new Error('legacy Hands script loaded but window.Hands not found');
+  legacyHands=new window.Hands({locateFile:file=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+  legacyHands.setOptions({maxNumHands:1,modelComplexity:1,minDetectionConfidence:.55,minTrackingConfidence:.50});
+  legacyHands.onResults(res=>{
+    if(res&&res.multiHandLandmarks&&res.multiHandLandmarks.length)processLandmarks(res.multiHandLandmarks[0]);
+    else{stablePeace=Math.max(0,stablePeace-1);stableThumb=Math.max(0,stableThumb-1)}
+  });
+  modelMode='legacy-hands';log('Legacy Hands fallback OK');
+}
+async function createModel(){
+  if(modelLoading)return;if(handLandmarker||legacyHands)return;
+  modelLoading=true;stateText.textContent='モデル読込';
+  try{
+    try{await createTaskVisionModel()}catch(e1){log('TaskVision failed: '+(e1.message||e1));await createLegacyHandsFallback()}
+    stateText.textContent='準備完了';
+  }finally{modelLoading=false}
+}
+async function taskVisionLoop(){if(!running||!handLandmarker)return;if(!detecting&&video.readyState>=2){detecting=true;try{const r=handLandmarker.detectForVideo(video,performance.now());if(r&&r.landmarks&&r.landmarks.length)processLandmarks(r.landmarks[0]);else{stablePeace=Math.max(0,stablePeace-1);stableThumb=Math.max(0,stableThumb-1)}}catch(e){log('detectForVideo failed: '+(e.message||e))}finally{detecting=false}}requestAnimationFrame(taskVisionLoop)}
+async function legacyLoop(){if(!running||!legacyHands)return;if(!detecting&&video.readyState>=2){detecting=true;try{await legacyHands.send({image:video})}catch(e){log('legacy send failed: '+(e.message||e))}finally{detecting=false}}requestAnimationFrame(legacyLoop)}
+function startDetectionLoop(){if(handLandmarker)taskVisionLoop();else if(legacyHands)legacyLoop()}
+
+async function getCameraStreamWithFallback(){
+  try{log('getUserMedia primary start');setStartStatus('カメラ許可を待っています。');return await withTimeout(navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:facingMode},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30,max:60}}}),12000,'カメラ起動')}
+  catch(e){log('primary camera failed: '+(e.message||e));setStartStatus('高解像度指定で失敗。最小構成で再試行中。');return await withTimeout(navigator.mediaDevices.getUserMedia({audio:false,video:true}),12000,'カメラ再試行')}
+}
+async function attachAndPlayVideo(nextStream){
+  video.srcObject=nextStream;
+  if(video.readyState<2){
+    await withTimeout(new Promise((resolve,reject)=>{
+      const cleanup=()=>{video.removeEventListener('loadedmetadata',ok);video.removeEventListener('canplay',ok);video.removeEventListener('error',ng)};
+      const ok=()=>{cleanup();resolve()};const ng=()=>{cleanup();reject(new Error('video要素の読み込みに失敗'))};
+      video.addEventListener('loadedmetadata',ok,{once:true});video.addEventListener('canplay',ok,{once:true});video.addEventListener('error',ng,{once:true});
+    }),8000,'カメラ映像の準備');
+  }
+  await withTimeout(video.play(),6000,'video.play()');
+}
+async function startCamera(){
+  if(startInProgress)return;startInProgress=true;clearError();setStartLoading(true);stateText.textContent='起動中';ensureAudio();
+  try{
+    if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)throw new Error('カメラAPIが使えません。GitHub PagesのHTTPS URLで開いてください。');
+    if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null}
+    stream=await getCameraStreamWithFallback();await attachAndPlayVideo(stream);
+    running=true;startLayer.style.display='none';stopBtn.disabled=false;switchBtn.disabled=false;stateText.textContent='カメラ起動';
+    resetGame();
+    log('Camera started. videoWidth='+video.videoWidth+' videoHeight='+video.videoHeight);
+    setTimeout(async()=>{try{await createModel();if(!running)return;setDebug(`準備完了。model=${modelMode}。ピースでビーム、親指で爆弾。`);startDetectionLoop()}catch(e){const msg=e.message||String(e);showError('認識モデルの読み込みに失敗しました。\n\n'+msg.slice(0,3000));setDebug('モデル読込失敗。GitHub PagesのHTTPS URLで開いているか確認してください。');log('Final model failure: '+msg)}},60);
+  }catch(e){running=false;if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}video.srcObject=null;stateText.textContent='起動失敗';showError(e.message||String(e));log('Camera start failed: '+(e.message||e))}
+  finally{startInProgress=false;setStartLoading(false)}
+}
+
+function stopCamera(showStart=true){running=false;detecting=false;gameActive=false;if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}video.srcObject=null;stopBtn.disabled=true;switchBtn.disabled=true;stateText.textContent='停止';if(showStart)startLayer.style.display='flex'}
+async function switchCamera(){facingMode=facingMode==='user'?'environment':'user';mirrored=facingMode==='user';video.style.transform=mirrored?'scaleX(-1)':'none';stateText.textContent='切替中';await startCamera()}
+
+function bindTap(el,fn){let last=0;const handler=ev=>{if(ev){ev.preventDefault();ev.stopPropagation()}const n=performance.now();if(n-last<280)return;last=n;fn()};el.addEventListener('click',handler);el.addEventListener('pointerup',handler);el.addEventListener('touchend',handler,{passive:false})}
+bindTap(startBtn,startCamera);
+bindTap(testBtn,()=>{const x=lastHandPoint?lastHandPoint.origin.x:innerWidth*.50,y=lastHandPoint?lastHandPoint.origin.y:innerHeight*.60,angle=lastHandPoint?lastHandPoint.angle:-Math.PI/2;fireBeam(x,y,angle,1.15);stateText.textContent='ビーーー'});
+bindTap(bombBtn,()=>{lastBombAt=performance.now()-30000;triggerBomb()});
+bindTap(soundBtn,()=>{ensureAudio();playBeamSound(.65);setDebug('音を有効化しました。ビーム音は短いブッではなく、伸びるビーーーにしています。')});
+bindTap(logBtn,()=>{logPanel.style.display=logPanel.style.display==='none'?'block':'none'});
+bindTap(stopBtn,()=>stopCamera(true));
+bindTap(switchBtn,switchCamera);
+bindTap(restartBtn,resetGame);
+bindTap(restartSmallBtn,resetGame);
+
+window.addEventListener('error',ev=>{const msg=ev&&ev.message?ev.message:'Unknown script error';log('Global error: '+msg);showError('JavaScriptエラー: '+msg);setStartLoading(false);startInProgress=false});
+window.addEventListener('unhandledrejection',ev=>{const reason=ev&&ev.reason?(ev.reason.message||String(ev.reason)):'Unknown promise rejection';log('Unhandled rejection: '+reason);showError('非同期エラー: '+reason);setStartLoading(false);startInProgress=false});
+window.addEventListener('resize',()=>{resizeCanvas(); if(gameActive)spawnWave();});
+resizeCanvas();resetGame();gameActive=false;animate();
+log('App booted. protocol='+location.protocol+' secure='+window.isSecureContext+' userAgent='+navigator.userAgent);
+if(location.protocol==='file:'){setDebug('警告：protocol=file: です。認識モデルは失敗しやすいです。GitHub Pagesの https://...github.io/... URLで開いてください。');setStartStatus('現在 file:// です。GitHub PagesのHTTPS公開URLで開くのが正解です。')}
+})();
+</script>
+</body>
+</html>
