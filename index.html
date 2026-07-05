@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Peace Beam AR v4 - HandLandmarker</title>
+<title>Peace Beam AR v5 - Timeout Safe</title>
 <style>
   :root{
     --bg:#03050a; --panel:rgba(8,13,22,.78); --panel2:rgba(15,22,34,.86);
@@ -110,15 +110,15 @@
 
 <div id="startLayer">
   <div id="startCard" class="glass">
-    <h1>Peace Beam AR v4</h1>
-    <p>Web向けMediaPipe Hand Landmarkerで手の21点ランドマークを取り、ピース判定でビームを撃つ版です。モデル読込失敗時は、どのURLで落ちたか診断ログに出します。</p>
+    <h1>Peace Beam AR v5</h1>
+    <p>起動中で固まらないよう、カメラ起動・映像再生・モデル読み込みにタイムアウトを入れた版です。モデル読込失敗時は、どのURLで落ちたか診断ログに出します。</p>
     <div class="grid">
       <div class="tile"><b>1. まずカメラ</b><span>カメラはモデルと別に起動。モデルが落ちても映像は出します。</span></div>
       <div class="tile"><b>2. モデル読込</b><span>tasks-visionを複数CDNから順番に試します。</span></div>
       <div class="tile"><b>3. ピース発射</b><span>人差し指と中指が伸びたらビーム音つきで発射。</span></div>
     </div>
     <button id="startBtn" type="button" class="primary">カメラを開始</button>
-    <div id="startStatus">ChatGPT内プレビューでモデルが落ちる場合は、GitHub Pages / Netlify / Vercel / localhost のHTTPS相当環境で開いてください。</div>
+    <div id="startStatus">GitHub PagesのURLをSafari/Chromeで直接開いてください。起動中で止まる場合は12秒前後で理由を表示します。</div>
     <div id="errorBox"></div>
   </div>
 </div>
@@ -578,56 +578,143 @@
     requestAnimationFrame(animate);
   }
 
+
+  function delay(ms){
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  function withTimeout(promise, ms, label){
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(label + ' がタイムアウトしました。')), ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+  }
+
+  async function getCameraStreamWithFallback(){
+    const primary = {
+      audio:false,
+      video:{
+        facingMode:{ideal:facingMode},
+        width:{ideal:1280},
+        height:{ideal:720},
+        frameRate:{ideal:30,max:60}
+      }
+    };
+
+    try{
+      log('getUserMedia primary start');
+      setStartStatus('カメラ許可を待っています。許可ダイアログが出たら「許可」を押してください。');
+      return await withTimeout(navigator.mediaDevices.getUserMedia(primary), 12000, 'カメラ起動');
+    }catch(primaryError){
+      log('getUserMedia primary failed: ' + (primaryError.message || primaryError));
+      setStartStatus('高解像度指定で失敗。最小構成で再試行しています。');
+
+      const fallback = { audio:false, video:true };
+      return await withTimeout(navigator.mediaDevices.getUserMedia(fallback), 12000, 'カメラ再試行');
+    }
+  }
+
+  async function attachAndPlayVideo(nextStream){
+    video.srcObject = nextStream;
+
+    if(video.readyState < 2){
+      await withTimeout(new Promise((resolve, reject) => {
+        const cleanup = () => {
+          video.removeEventListener('loadedmetadata', onReady);
+          video.removeEventListener('canplay', onReady);
+          video.removeEventListener('error', onError);
+        };
+        const onReady = () => { cleanup(); resolve(); };
+        const onError = () => { cleanup(); reject(new Error('video要素の読み込みに失敗しました。')); };
+        video.addEventListener('loadedmetadata', onReady, {once:true});
+        video.addEventListener('canplay', onReady, {once:true});
+        video.addEventListener('error', onError, {once:true});
+      }), 8000, 'カメラ映像の準備');
+    }
+
+    setStartStatus('映像を再生しています。');
+    await withTimeout(video.play(), 6000, 'video.play()');
+  }
+
   async function startCamera(){
-    if(startInProgress) return;
+    if(startInProgress){
+      log('startCamera ignored: already in progress');
+      return;
+    }
+
     startInProgress = true;
     clearError();
     setStartLoading(true);
     set(stateText,'起動中');
-    setStartStatus('カメラ許可を待っています。');
+    set(modelText, handLandmarker ? '準備完了' : '未読込');
+    set(gestureText,'未検出');
+    setDebug('起動処理中。12秒以上止まる場合は、自動でタイムアウトして理由を表示します。');
     ensureAudio();
 
     try{
-      if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
-        throw new Error('カメラAPIが使えません。HTTPS / localhost / GitHub Pages 等で開いてください。');
+      if(!window.isSecureContext){
+        log('Warning: not secure context. protocol=' + location.protocol);
       }
-      if(stream) stopCamera(false);
+      if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+        throw new Error('カメラAPIが使えません。GitHub PagesのHTTPS URLをSafari/Chromeで直接開いてください。アプリ内ブラウザでは失敗することがあります。');
+      }
 
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio:false,
-        video:{facingMode:{ideal:facingMode},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30,max:60}}
-      });
-      video.srcObject = stream;
-      await video.play();
+      if(stream){
+        stream.getTracks().forEach(t=>t.stop());
+        stream = null;
+        video.srcObject = null;
+      }
+
+      const nextStream = await getCameraStreamWithFallback();
+      stream = nextStream;
+
+      setStartStatus('カメラ映像を準備しています。');
+      await attachAndPlayVideo(nextStream);
 
       running = true;
       startLayer.style.display='none';
-      stopBtn.disabled=false; switchBtn.disabled=false;
+      stopBtn.disabled=false;
+      switchBtn.disabled=false;
       set(stateText,'カメラ起動');
       setStartStatus('');
-      setDebug('カメラ起動済み。モデルを読み込みます。失敗したら「診断ログ」を見てください。');
+      setDebug('カメラ起動済み。モデル読み込みを開始します。モデルが失敗しても、ビームと音だけテストは使えます。');
+      log('Camera started. videoWidth=' + video.videoWidth + ' videoHeight=' + video.videoHeight);
 
-      try{
-        await createHandLandmarker();
-        set(stateText,'準備完了');
-        set(gestureText,'探索中');
-        setDebug('準備完了。ピースしてください。人差し指と中指を伸ばすだけでかなり拾う設定です。');
-        detectLoop();
-      }catch(e){
-        set(modelText,'失敗');
-        set(stateText,'カメラのみ');
-        const msg = e.message || String(e);
-        showError('認識モデルの読み込みに失敗しました。\n\n' + msg.slice(0,3000));
-        setDebug('モデル読込失敗。診断ログを開いて、MODULE / WASM / MODEL のどこで落ちたか確認してください。ChatGPT内ビューなら外部CDNがブロックされている可能性が高いです。');
-        log('Final model load failure: '+msg);
-      }
+      // Do not block the start UI on model loading.
+      setTimeout(async () => {
+        try{
+          await createHandLandmarker();
+          if(!running) return;
+          set(stateText,'準備完了');
+          set(gestureText,'探索中');
+          setDebug('準備完了。ピースしてください。人差し指と中指を伸ばすだけでかなり拾う設定です。');
+          detectLoop();
+        }catch(e){
+          if(!running) return;
+          set(modelText,'失敗');
+          set(stateText,'カメラのみ');
+          const msg = e.message || String(e);
+          showError('認識モデルの読み込みに失敗しました。\n\n' + msg.slice(0,3000));
+          setDebug('モデル読込失敗。診断ログを開いて、MODULE / WASM / MODEL のどこで落ちたか確認してください。カメラだけは起動済みです。');
+          log('Final model load failure: '+msg);
+        }
+      }, 60);
+
     }catch(e){
       running=false;
-      if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
+      if(stream){
+        stream.getTracks().forEach(t=>t.stop());
+        stream=null;
+      }
+      video.srcObject = null;
       set(stateText,'起動失敗');
-      showError(e.message || String(e));
-      setStartStatus('カメラ起動失敗。ChatGPT内ビューまたはfile://直開きでは制限される場合があります。');
-      log('Camera start failed: '+(e.message || e));
+      set(gestureText,'未検出');
+      const msg = e.message || String(e);
+      showError(msg + '\n\n対処：\n1. iPhoneならSafariでGitHub PagesのURLを直接開く\n2. アドレスバー左の「あぁ」/サイト設定からカメラを許可\n3. iOS設定 → Safari → カメラ が「確認」または「許可」になっているか確認\n4. 会社Wi-Fiやコンテンツブロッカーを一度切る');
+      setStartStatus('起動失敗。診断ログを開いてください。ボタンは再度押せます。');
+      setDebug('カメラ起動で失敗。モデル以前の問題です。Safariのカメラ許可か、ブラウザ環境を確認してください。');
+      log('Camera start failed: '+msg);
     }finally{
       startInProgress=false;
       setStartLoading(false);
