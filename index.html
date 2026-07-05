@@ -1,0 +1,782 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Peace Beam AR v5 - Timeout Safe</title>
+<style>
+  :root{
+    --bg:#03050a; --panel:rgba(8,13,22,.78); --panel2:rgba(15,22,34,.86);
+    --line:rgba(255,255,255,.13); --ink:#edf7ff; --muted:#9fb0c2;
+    --cyan:#72e7ff; --blue:#7aa8ff; --pink:#ff7ae6; --green:#99ffc7;
+    --yellow:#ffe37a; --red:#ff7777;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{
+    margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic","Noto Sans JP",system-ui,sans-serif;
+  }
+  #stage{position:fixed;inset:0;background:#000}
+  video,canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none}
+  video{background:#000;transform:scaleX(-1)}
+  #fx{z-index:2}
+  .glass{
+    border:1px solid var(--line);background:var(--panel);backdrop-filter:blur(14px);
+    box-shadow:0 16px 48px rgba(0,0,0,.34);
+  }
+  #hud{
+    position:fixed;z-index:4;left:12px;right:12px;top:calc(12px + env(safe-area-inset-top));
+    display:flex;justify-content:space-between;gap:8px;pointer-events:none;flex-wrap:wrap;
+  }
+  .pill{border-radius:999px;padding:8px 11px;font-size:12px;line-height:1.2}
+  .pill b{color:var(--cyan)}
+  #debug{
+    position:fixed;z-index:4;left:12px;bottom:calc(78px + env(safe-area-inset-bottom));
+    width:min(560px,calc(100% - 24px));border-radius:16px;padding:10px 12px;
+    color:#dcecff;font-size:12px;line-height:1.55;pointer-events:none;white-space:pre-wrap;
+  }
+  #controls{
+    position:fixed;z-index:5;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));
+    display:flex;gap:8px;justify-content:center;flex-wrap:wrap;pointer-events:auto;
+  }
+  button{
+    appearance:none;border:1px solid var(--line);background:rgba(13,20,31,.90);
+    color:var(--ink);border-radius:14px;padding:11px 13px;min-height:44px;
+    font-size:14px;font-weight:750;touch-action:manipulation;user-select:none;
+    box-shadow:0 14px 36px rgba(0,0,0,.32);
+  }
+  button.primary{background:linear-gradient(135deg,rgba(114,231,255,.28),rgba(122,168,255,.22));border-color:rgba(114,231,255,.42)}
+  button.good{background:rgba(153,255,199,.12);border-color:rgba(153,255,199,.32)}
+  button.warn{background:rgba(255,119,119,.15);border-color:rgba(255,119,119,.35)}
+  button:disabled{opacity:.45}
+  #startLayer{
+    position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;
+    padding:20px;background:
+      radial-gradient(circle at 50% 12%,rgba(114,231,255,.18),transparent 34%),
+      linear-gradient(180deg,rgba(2,5,10,.74),rgba(2,5,10,.96));
+  }
+  #startCard{width:min(680px,100%);border-radius:24px;padding:22px}
+  h1{margin:0 0 8px;font-size:28px;letter-spacing:-.04em}
+  p{margin:0 0 14px;color:var(--muted);font-size:14px;line-height:1.7}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:14px 0 16px}
+  .tile{border:1px solid var(--line);background:rgba(255,255,255,.035);border-radius:16px;padding:12px;min-height:86px}
+  .tile b{display:block;color:var(--cyan);margin-bottom:6px}
+  .tile span{display:block;color:var(--muted);font-size:12px;line-height:1.45}
+  #startBtn{width:100%;font-size:16px;padding:15px 18px;border-radius:16px}
+  #startStatus{min-height:22px;margin-top:12px;color:var(--cyan);font-size:13px;line-height:1.55;white-space:pre-wrap}
+  #errorBox{
+    display:none;margin-top:12px;border:1px solid rgba(255,119,119,.36);
+    background:rgba(255,119,119,.12);color:#ffd7d7;border-radius:14px;
+    padding:12px;font-size:13px;line-height:1.55;white-space:pre-wrap;max-height:180px;overflow:auto;
+  }
+  #logPanel{
+    position:fixed;z-index:6;right:12px;top:calc(62px + env(safe-area-inset-top));
+    width:min(440px,calc(100% - 24px));max-height:42vh;overflow:auto;border-radius:16px;
+    padding:11px 12px;font-size:11px;line-height:1.5;color:#cfe7ff;white-space:pre-wrap;display:none;
+  }
+  @media(max-width:640px){
+    .grid{grid-template-columns:1fr}
+    h1{font-size:24px}
+    #controls{justify-content:stretch}
+    #controls button{flex:1 1 auto}
+    #debug{font-size:11px}
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <video id="video" playsinline muted></video>
+  <canvas id="fx"></canvas>
+</div>
+
+<div id="hud">
+  <div class="pill glass">状態：<b id="stateText">待機中</b></div>
+  <div class="pill glass">モデル：<b id="modelText">未読込</b></div>
+  <div class="pill glass">認識：<b id="gestureText">未検出</b></div>
+  <div class="pill glass">音：<b id="soundText">未起動</b></div>
+</div>
+
+<div id="debug" class="glass">未起動。まず「ビームと音だけテスト」で描画と音を確認できます。</div>
+<div id="logPanel" class="glass"></div>
+
+<div id="controls">
+  <button id="testBtn" type="button" class="primary">ビームと音だけテスト</button>
+  <button id="loadModelBtn" type="button" class="good">モデル再読込</button>
+  <button id="soundBtn" type="button">音を有効化</button>
+  <button id="logBtn" type="button">診断ログ</button>
+  <button id="switchBtn" type="button" disabled>カメラ切替</button>
+  <button id="stopBtn" type="button" class="warn" disabled>停止</button>
+</div>
+
+<div id="startLayer">
+  <div id="startCard" class="glass">
+    <h1>Peace Beam AR v5</h1>
+    <p>起動中で固まらないよう、カメラ起動・映像再生・モデル読み込みにタイムアウトを入れた版です。モデル読込失敗時は、どのURLで落ちたか診断ログに出します。</p>
+    <div class="grid">
+      <div class="tile"><b>1. まずカメラ</b><span>カメラはモデルと別に起動。モデルが落ちても映像は出します。</span></div>
+      <div class="tile"><b>2. モデル読込</b><span>tasks-visionを複数CDNから順番に試します。</span></div>
+      <div class="tile"><b>3. ピース発射</b><span>人差し指と中指が伸びたらビーム音つきで発射。</span></div>
+    </div>
+    <button id="startBtn" type="button" class="primary">カメラを開始</button>
+    <div id="startStatus">GitHub PagesのURLをSafari/Chromeで直接開いてください。起動中で止まる場合は12秒前後で理由を表示します。</div>
+    <div id="errorBox"></div>
+  </div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('fx');
+  const ctx = canvas.getContext('2d', {alpha:true});
+
+  const startLayer = document.getElementById('startLayer');
+  const startBtn = document.getElementById('startBtn');
+  const testBtn = document.getElementById('testBtn');
+  const loadModelBtn = document.getElementById('loadModelBtn');
+  const soundBtn = document.getElementById('soundBtn');
+  const logBtn = document.getElementById('logBtn');
+  const switchBtn = document.getElementById('switchBtn');
+  const stopBtn = document.getElementById('stopBtn');
+
+  const stateText = document.getElementById('stateText');
+  const modelText = document.getElementById('modelText');
+  const gestureText = document.getElementById('gestureText');
+  const soundText = document.getElementById('soundText');
+  const debug = document.getElementById('debug');
+  const logPanel = document.getElementById('logPanel');
+  const startStatus = document.getElementById('startStatus');
+  const errorBox = document.getElementById('errorBox');
+
+  const TASK_IMPORTS = [
+    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/vision_bundle.mjs',
+    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.mjs',
+    'https://unpkg.com/@mediapipe/tasks-vision@0.10.22/vision_bundle.mjs',
+    'https://unpkg.com/@mediapipe/tasks-vision/vision_bundle.mjs'
+  ];
+  const WASM_BASES = [
+    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm',
+    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm',
+    'https://unpkg.com/@mediapipe/tasks-vision@0.10.22/wasm',
+    'https://unpkg.com/@mediapipe/tasks-vision/wasm'
+  ];
+  const MODEL_URLS = [
+    'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+    'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/full/1/hand_landmarker.task'
+  ];
+
+  let stream = null;
+  let facingMode = 'user';
+  let mirrored = true;
+  let running = false;
+  let startInProgress = false;
+  let detecting = false;
+
+  let HandLandmarker = null;
+  let FilesetResolver = null;
+  let handLandmarker = null;
+  let activeImportUrl = '';
+  let activeWasmBase = '';
+  let activeModelUrl = '';
+
+  let audioCtx = null;
+  let lastResultAt = 0;
+  let lastBeamAt = 0;
+  let stablePeace = 0;
+  let lastHandPoint = null;
+
+  const beams = [];
+  const sparks = [];
+  const rings = [];
+  const logs = [];
+
+  function nowIso(){ return new Date().toLocaleTimeString(); }
+  function log(msg){
+    const line = `[${nowIso()}] ${msg}`;
+    logs.push(line);
+    if(logs.length > 90) logs.shift();
+    logPanel.textContent = logs.join('\n');
+    console.log(line);
+  }
+  function set(el, text){ el.textContent = text; }
+  function setDebug(text){ debug.textContent = text; }
+  function clearError(){ errorBox.style.display='none'; errorBox.textContent=''; }
+  function showError(text){ errorBox.style.display='block'; errorBox.textContent=text; }
+  function setStartLoading(v){ startBtn.disabled=!!v; startBtn.textContent=v?'起動中…':'カメラを開始'; }
+
+  function resizeCanvas(){
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = Math.floor(innerWidth*dpr), h = Math.floor(innerHeight*dpr);
+    if(canvas.width !== w || canvas.height !== h){
+      canvas.width = w; canvas.height = h;
+      canvas.style.width = innerWidth+'px'; canvas.style.height = innerHeight+'px';
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+    }
+  }
+
+  function ensureAudio(){
+    try{
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if(!AC){ set(soundText,'非対応'); return null; }
+      if(!audioCtx) audioCtx = new AC();
+      if(audioCtx.state === 'suspended') audioCtx.resume();
+      set(soundText,'有効');
+      return audioCtx;
+    }catch(e){
+      set(soundText,'失敗');
+      log('Audio init failed: '+(e.message || e));
+      return null;
+    }
+  }
+
+  function playBeamSound(power=1){
+    const ac = ensureAudio();
+    if(!ac) return;
+    const t = ac.currentTime;
+    const out = ac.createGain();
+    out.gain.setValueAtTime(0.0001,t);
+    out.gain.exponentialRampToValueAtTime(0.24*power,t+0.015);
+    out.gain.exponentialRampToValueAtTime(0.0001,t+0.36);
+    out.connect(ac.destination);
+
+    const osc = ac.createOscillator();
+    const g = ac.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(150,t);
+    osc.frequency.exponentialRampToValueAtTime(1320,t+0.11);
+    osc.frequency.exponentialRampToValueAtTime(220,t+0.34);
+    g.gain.setValueAtTime(0.24,t);
+    g.gain.exponentialRampToValueAtTime(0.0001,t+0.35);
+    osc.connect(g).connect(out);
+    osc.start(t); osc.stop(t+0.36);
+
+    const osc2 = ac.createOscillator();
+    const g2 = ac.createGain();
+    osc2.type = 'triangle';
+    osc2.frequency.setValueAtTime(980,t);
+    osc2.frequency.exponentialRampToValueAtTime(2100,t+0.07);
+    osc2.frequency.exponentialRampToValueAtTime(520,t+0.25);
+    g2.gain.setValueAtTime(0.08,t);
+    g2.gain.exponentialRampToValueAtTime(0.0001,t+0.25);
+    osc2.connect(g2).connect(out);
+    osc2.start(t); osc2.stop(t+0.26);
+
+    const size = Math.floor(ac.sampleRate * 0.13);
+    const buffer = ac.createBuffer(1, size, ac.sampleRate);
+    const data = buffer.getChannelData(0);
+    for(let i=0;i<size;i++){
+      const p = i/size;
+      data[i] = (Math.random()*2-1) * Math.pow(1-p,2.8);
+    }
+    const noise = ac.createBufferSource();
+    noise.buffer = buffer;
+    const filter = ac.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(1800,t);
+    filter.frequency.exponentialRampToValueAtTime(4800,t+0.08);
+    const ng = ac.createGain();
+    ng.gain.setValueAtTime(0.04*power,t);
+    ng.gain.exponentialRampToValueAtTime(0.0001,t+0.13);
+    noise.connect(filter).connect(ng).connect(out);
+    noise.start(t); noise.stop(t+0.14);
+  }
+
+  async function importWithTimeout(url, ms=12000){
+    return await Promise.race([
+      import(url),
+      new Promise((_,reject)=>setTimeout(()=>reject(new Error('timeout after '+ms+'ms')),ms))
+    ]);
+  }
+
+  async function createHandLandmarker(){
+    if(handLandmarker) return handLandmarker;
+    set(modelText,'読込中');
+    log('Model load started.');
+    const failures = [];
+
+    for(const importUrl of TASK_IMPORTS){
+      try{
+        log('Trying module import: '+importUrl);
+        const mod = await importWithTimeout(importUrl, 14000);
+        if(!mod.HandLandmarker || !mod.FilesetResolver){
+          throw new Error('module loaded but HandLandmarker / FilesetResolver not found');
+        }
+        HandLandmarker = mod.HandLandmarker;
+        FilesetResolver = mod.FilesetResolver;
+        activeImportUrl = importUrl;
+        log('Module import OK: '+importUrl);
+        break;
+      }catch(e){
+        failures.push(`MODULE ${importUrl}\n  ${e.message || e}`);
+        log('Module import failed: '+importUrl+' / '+(e.message || e));
+      }
+    }
+    if(!HandLandmarker || !FilesetResolver){
+      set(modelText,'失敗');
+      throw new Error('tasks-vision module import failed.\n\n'+failures.join('\n\n'));
+    }
+
+    for(const wasmBase of WASM_BASES){
+      for(const modelUrl of MODEL_URLS){
+        try{
+          log('Trying wasm: '+wasmBase);
+          log('Trying model: '+modelUrl);
+          const vision = await Promise.race([
+            FilesetResolver.forVisionTasks(wasmBase),
+            new Promise((_,reject)=>setTimeout(()=>reject(new Error('FilesetResolver timeout')), 16000))
+          ]);
+          const landmarker = await Promise.race([
+            HandLandmarker.createFromOptions(vision, {
+              baseOptions: {
+                modelAssetPath: modelUrl,
+                delegate: 'GPU'
+              },
+              runningMode: 'VIDEO',
+              numHands: 1,
+              minHandDetectionConfidence: 0.45,
+              minHandPresenceConfidence: 0.45,
+              minTrackingConfidence: 0.45
+            }),
+            new Promise((_,reject)=>setTimeout(()=>reject(new Error('createFromOptions timeout')), 22000))
+          ]);
+          handLandmarker = landmarker;
+          activeWasmBase = wasmBase;
+          activeModelUrl = modelUrl;
+          set(modelText,'準備完了');
+          log('HandLandmarker OK.');
+          log('Active module: '+activeImportUrl);
+          log('Active wasm: '+activeWasmBase);
+          log('Active model: '+activeModelUrl);
+          return handLandmarker;
+        }catch(e){
+          failures.push(`WASM/MODEL ${wasmBase}\n${modelUrl}\n  ${e.message || e}`);
+          log('WASM/model failed: '+(e.message || e));
+        }
+      }
+    }
+
+    // GPU delegate may fail on some iOS/browser combinations. Retry CPU.
+    for(const wasmBase of WASM_BASES){
+      for(const modelUrl of MODEL_URLS){
+        try{
+          log('Retry CPU delegate. wasm='+wasmBase+' model='+modelUrl);
+          const vision = await Promise.race([
+            FilesetResolver.forVisionTasks(wasmBase),
+            new Promise((_,reject)=>setTimeout(()=>reject(new Error('FilesetResolver timeout CPU')), 16000))
+          ]);
+          const landmarker = await Promise.race([
+            HandLandmarker.createFromOptions(vision, {
+              baseOptions: { modelAssetPath: modelUrl, delegate: 'CPU' },
+              runningMode: 'VIDEO',
+              numHands: 1,
+              minHandDetectionConfidence: 0.45,
+              minHandPresenceConfidence: 0.45,
+              minTrackingConfidence: 0.45
+            }),
+            new Promise((_,reject)=>setTimeout(()=>reject(new Error('createFromOptions timeout CPU')), 22000))
+          ]);
+          handLandmarker = landmarker;
+          activeWasmBase = wasmBase;
+          activeModelUrl = modelUrl;
+          set(modelText,'準備完了');
+          log('HandLandmarker OK with CPU delegate.');
+          return handLandmarker;
+        }catch(e){
+          failures.push(`CPU ${wasmBase}\n${modelUrl}\n  ${e.message || e}`);
+          log('CPU retry failed: '+(e.message || e));
+        }
+      }
+    }
+
+    set(modelText,'失敗');
+    throw new Error('HandLandmarker creation failed.\n\n'+failures.join('\n\n'));
+  }
+
+  function mapPoint(p){
+    return {
+      x: (mirrored ? (1 - p.x) : p.x) * innerWidth,
+      y: p.y * innerHeight
+    };
+  }
+  function d(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+
+  function isExtended(lm, tip, pip, mcp){
+    const wrist = lm[0];
+    const tipD = d(lm[tip], wrist);
+    const pipD = d(lm[pip], wrist);
+    const mcpD = d(lm[mcp], wrist);
+    return tipD > pipD * 1.03 && tipD > mcpD * 1.20;
+  }
+
+  function detectPeace(lm){
+    const idx = isExtended(lm,8,6,5);
+    const mid = isExtended(lm,12,10,9);
+    const ring = isExtended(lm,16,14,13);
+    const pinky = isExtended(lm,20,18,17);
+    const spread = d(lm[8], lm[12]) > Math.max(16, d(lm[5], lm[17]) * 0.13);
+    // MVP: ring/pinky must not both look strongly extended. Too strict = no beam.
+    const peace = idx && mid && spread && !(ring && pinky);
+    return {peace, idx, mid, ring, pinky, spread};
+  }
+
+  function processLandmarks(raw){
+    const lm = raw.map(mapPoint);
+    const g = detectPeace(lm);
+    const wrist = lm[0], indexTip = lm[8], middleTip = lm[12];
+    const origin = {x:(indexTip.x+middleTip.x)/2, y:(indexTip.y+middleTip.y)/2};
+    const angle = Math.atan2(origin.y-wrist.y, origin.x-wrist.x);
+    lastHandPoint = {origin, wrist, lm, angle, peace:g.peace};
+
+    if(g.peace){
+      stablePeace++;
+      set(gestureText,'ピース');
+      setDebug(`ピース判定中 ${stablePeace}/3\nindex:${g.idx} middle:${g.mid} spread:${g.spread} ring:${g.ring} pinky:${g.pinky}`);
+    }else{
+      stablePeace = Math.max(0, stablePeace - 1);
+      set(gestureText,'手検出');
+      setDebug(`手は検出。条件未達\nindex:${g.idx} middle:${g.mid} spread:${g.spread} ring:${g.ring} pinky:${g.pinky}`);
+    }
+
+    const now = performance.now();
+    if(stablePeace >= 3 && now - lastBeamAt > 500){
+      fireBeam(origin.x, origin.y, angle, 1.0);
+      stablePeace = 0;
+      lastBeamAt = now;
+      set(stateText,'発射');
+    }
+  }
+
+  async function detectLoop(){
+    if(!running || !handLandmarker) return;
+    if(!detecting && video.readyState >= 2){
+      detecting = true;
+      try{
+        const result = handLandmarker.detectForVideo(video, performance.now());
+        lastResultAt = performance.now();
+        if(result && result.landmarks && result.landmarks.length){
+          processLandmarks(result.landmarks[0]);
+        }else{
+          stablePeace = Math.max(0, stablePeace - 1);
+          set(gestureText,'探索中');
+        }
+      }catch(e){
+        log('detectForVideo failed: '+(e.message || e));
+      }finally{
+        detecting = false;
+      }
+    }
+    requestAnimationFrame(detectLoop);
+  }
+
+  function fireBeam(x, y, angle, power=1){
+    const now = performance.now();
+    const len = Math.max(innerWidth, innerHeight) * 1.35;
+    beams.push({x,y,angle,power,len,born:now,duration:620,wobble:Math.random()*Math.PI*2});
+    rings.push({x,y,power,born:now,duration:360});
+    for(let i=0;i<28;i++){
+      const a = angle + Math.PI + (Math.random()-.5)*1.9;
+      const sp = 90 + Math.random()*300;
+      sparks.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,born:now,duration:360+Math.random()*280,r:1.4+Math.random()*3.8});
+    }
+    playBeamSound(power);
+  }
+
+  function testFire(){
+    ensureAudio();
+    const x = lastHandPoint ? lastHandPoint.origin.x : innerWidth*0.50;
+    const y = lastHandPoint ? lastHandPoint.origin.y : innerHeight*0.56;
+    const angle = lastHandPoint ? lastHandPoint.angle : -Math.PI/2;
+    fireBeam(x,y,angle,1.15);
+    set(stateText,'テスト発射');
+    set(gestureText,'手動');
+    setDebug('テスト発射OK。これが見えればビーム描画と音は正常。認識が問題ならモデル読込かピース判定が原因です。');
+  }
+
+  function drawBeam(b, now){
+    const t = (now-b.born)/b.duration;
+    if(t<0 || t>1) return false;
+    const fade = 1-t;
+    const grow = Math.min(1,t*4);
+    const len = b.len*grow;
+    const x2 = b.x + Math.cos(b.angle)*len;
+    const y2 = b.y + Math.sin(b.angle)*len;
+    const side = Math.sin(now*.025+b.wobble)*5;
+    ctx.save();
+    ctx.globalCompositeOperation='lighter';
+    ctx.lineCap='round';
+    ctx.shadowColor='rgba(114,231,255,.95)';
+    ctx.shadowBlur=36;
+    ctx.strokeStyle=`rgba(114,231,255,${.34*fade})`;
+    ctx.lineWidth=46*fade*b.power;
+    ctx.beginPath(); ctx.moveTo(b.x,b.y); ctx.lineTo(x2+side,y2-side); ctx.stroke();
+    ctx.strokeStyle=`rgba(122,168,255,${.76*fade})`;
+    ctx.lineWidth=18*fade*b.power;
+    ctx.shadowBlur=22;
+    ctx.beginPath(); ctx.moveTo(b.x,b.y); ctx.lineTo(x2,y2); ctx.stroke();
+    ctx.strokeStyle=`rgba(255,255,255,${.96*fade})`;
+    ctx.lineWidth=5.5*fade*b.power;
+    ctx.shadowBlur=10;
+    ctx.beginPath(); ctx.moveTo(b.x,b.y); ctx.lineTo(x2,y2); ctx.stroke();
+    ctx.strokeStyle=`rgba(255,122,230,${.28*fade})`;
+    ctx.lineWidth=2*fade;
+    ctx.beginPath(); ctx.moveTo(b.x,b.y); ctx.lineTo(x2+side*3,y2-side*3); ctx.stroke();
+    ctx.restore();
+    return true;
+  }
+
+  function drawRing(r, now){
+    const t=(now-r.born)/r.duration;
+    if(t<0 || t>1) return false;
+    const a=1-t, rad=12+t*78*r.power;
+    ctx.save(); ctx.globalCompositeOperation='lighter';
+    ctx.strokeStyle=`rgba(114,231,255,${a*.78})`; ctx.lineWidth=4*a; ctx.shadowColor='rgba(114,231,255,.95)'; ctx.shadowBlur=22;
+    ctx.beginPath(); ctx.arc(r.x,r.y,rad,0,Math.PI*2); ctx.stroke();
+    ctx.strokeStyle=`rgba(255,122,230,${a*.38})`; ctx.lineWidth=2*a;
+    ctx.beginPath(); ctx.arc(r.x,r.y,rad*.62,0,Math.PI*2); ctx.stroke();
+    ctx.restore();
+    return true;
+  }
+
+  function drawSpark(s, now, dt){
+    const t=(now-s.born)/s.duration;
+    if(t<0 || t>1) return false;
+    s.x += s.vx*dt; s.y += s.vy*dt; s.vx*=.985; s.vy=s.vy*.985+26*dt;
+    const a=1-t;
+    ctx.save(); ctx.globalCompositeOperation='lighter';
+    ctx.fillStyle=`rgba(255,227,122,${a})`; ctx.shadowColor='rgba(255,227,122,.9)'; ctx.shadowBlur=12;
+    ctx.beginPath(); ctx.arc(s.x,s.y,s.r*a,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+    return true;
+  }
+
+  function drawHandAim(now){
+    if(!lastHandPoint || now-lastResultAt>900) return;
+    const {origin,wrist,lm,peace}=lastHandPoint;
+    ctx.save(); ctx.globalCompositeOperation='lighter'; ctx.lineCap='round';
+    ctx.strokeStyle = peace ? 'rgba(153,255,199,.72)' : 'rgba(114,231,255,.36)';
+    ctx.lineWidth=2.6; ctx.beginPath(); ctx.moveTo(wrist.x,wrist.y); ctx.lineTo(origin.x,origin.y); ctx.stroke();
+    ctx.fillStyle = peace ? 'rgba(153,255,199,.94)' : 'rgba(114,231,255,.64)';
+    [8,12].forEach(i=>{ ctx.beginPath(); ctx.arc(lm[i].x,lm[i].y,7,0,Math.PI*2); ctx.fill(); });
+    if(peace){
+      ctx.strokeStyle='rgba(153,255,199,.6)'; ctx.lineWidth=3;
+      ctx.beginPath(); ctx.arc(origin.x,origin.y,18+Math.sin(now*.02)*4,0,Math.PI*2); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  let lastFrame=performance.now();
+  function animate(){
+    resizeCanvas();
+    const now=performance.now();
+    const dt=Math.min(.033,(now-lastFrame)/1000); lastFrame=now;
+    ctx.clearRect(0,0,innerWidth,innerHeight);
+    drawHandAim(now);
+    for(let i=beams.length-1;i>=0;i--) if(!drawBeam(beams[i],now)) beams.splice(i,1);
+    for(let i=rings.length-1;i>=0;i--) if(!drawRing(rings[i],now)) rings.splice(i,1);
+    for(let i=sparks.length-1;i>=0;i--) if(!drawSpark(sparks[i],now,dt)) sparks.splice(i,1);
+    requestAnimationFrame(animate);
+  }
+
+
+  function delay(ms){
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  function withTimeout(promise, ms, label){
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(label + ' がタイムアウトしました。')), ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+  }
+
+  async function getCameraStreamWithFallback(){
+    const primary = {
+      audio:false,
+      video:{
+        facingMode:{ideal:facingMode},
+        width:{ideal:1280},
+        height:{ideal:720},
+        frameRate:{ideal:30,max:60}
+      }
+    };
+
+    try{
+      log('getUserMedia primary start');
+      setStartStatus('カメラ許可を待っています。許可ダイアログが出たら「許可」を押してください。');
+      return await withTimeout(navigator.mediaDevices.getUserMedia(primary), 12000, 'カメラ起動');
+    }catch(primaryError){
+      log('getUserMedia primary failed: ' + (primaryError.message || primaryError));
+      setStartStatus('高解像度指定で失敗。最小構成で再試行しています。');
+
+      const fallback = { audio:false, video:true };
+      return await withTimeout(navigator.mediaDevices.getUserMedia(fallback), 12000, 'カメラ再試行');
+    }
+  }
+
+  async function attachAndPlayVideo(nextStream){
+    video.srcObject = nextStream;
+
+    if(video.readyState < 2){
+      await withTimeout(new Promise((resolve, reject) => {
+        const cleanup = () => {
+          video.removeEventListener('loadedmetadata', onReady);
+          video.removeEventListener('canplay', onReady);
+          video.removeEventListener('error', onError);
+        };
+        const onReady = () => { cleanup(); resolve(); };
+        const onError = () => { cleanup(); reject(new Error('video要素の読み込みに失敗しました。')); };
+        video.addEventListener('loadedmetadata', onReady, {once:true});
+        video.addEventListener('canplay', onReady, {once:true});
+        video.addEventListener('error', onError, {once:true});
+      }), 8000, 'カメラ映像の準備');
+    }
+
+    setStartStatus('映像を再生しています。');
+    await withTimeout(video.play(), 6000, 'video.play()');
+  }
+
+  async function startCamera(){
+    if(startInProgress){
+      log('startCamera ignored: already in progress');
+      return;
+    }
+
+    startInProgress = true;
+    clearError();
+    setStartLoading(true);
+    set(stateText,'起動中');
+    set(modelText, handLandmarker ? '準備完了' : '未読込');
+    set(gestureText,'未検出');
+    setDebug('起動処理中。12秒以上止まる場合は、自動でタイムアウトして理由を表示します。');
+    ensureAudio();
+
+    try{
+      if(!window.isSecureContext){
+        log('Warning: not secure context. protocol=' + location.protocol);
+      }
+      if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+        throw new Error('カメラAPIが使えません。GitHub PagesのHTTPS URLをSafari/Chromeで直接開いてください。アプリ内ブラウザでは失敗することがあります。');
+      }
+
+      if(stream){
+        stream.getTracks().forEach(t=>t.stop());
+        stream = null;
+        video.srcObject = null;
+      }
+
+      const nextStream = await getCameraStreamWithFallback();
+      stream = nextStream;
+
+      setStartStatus('カメラ映像を準備しています。');
+      await attachAndPlayVideo(nextStream);
+
+      running = true;
+      startLayer.style.display='none';
+      stopBtn.disabled=false;
+      switchBtn.disabled=false;
+      set(stateText,'カメラ起動');
+      setStartStatus('');
+      setDebug('カメラ起動済み。モデル読み込みを開始します。モデルが失敗しても、ビームと音だけテストは使えます。');
+      log('Camera started. videoWidth=' + video.videoWidth + ' videoHeight=' + video.videoHeight);
+
+      // Do not block the start UI on model loading.
+      setTimeout(async () => {
+        try{
+          await createHandLandmarker();
+          if(!running) return;
+          set(stateText,'準備完了');
+          set(gestureText,'探索中');
+          setDebug('準備完了。ピースしてください。人差し指と中指を伸ばすだけでかなり拾う設定です。');
+          detectLoop();
+        }catch(e){
+          if(!running) return;
+          set(modelText,'失敗');
+          set(stateText,'カメラのみ');
+          const msg = e.message || String(e);
+          showError('認識モデルの読み込みに失敗しました。\n\n' + msg.slice(0,3000));
+          setDebug('モデル読込失敗。診断ログを開いて、MODULE / WASM / MODEL のどこで落ちたか確認してください。カメラだけは起動済みです。');
+          log('Final model load failure: '+msg);
+        }
+      }, 60);
+
+    }catch(e){
+      running=false;
+      if(stream){
+        stream.getTracks().forEach(t=>t.stop());
+        stream=null;
+      }
+      video.srcObject = null;
+      set(stateText,'起動失敗');
+      set(gestureText,'未検出');
+      const msg = e.message || String(e);
+      showError(msg + '\n\n対処：\n1. iPhoneならSafariでGitHub PagesのURLを直接開く\n2. アドレスバー左の「あぁ」/サイト設定からカメラを許可\n3. iOS設定 → Safari → カメラ が「確認」または「許可」になっているか確認\n4. 会社Wi-Fiやコンテンツブロッカーを一度切る');
+      setStartStatus('起動失敗。診断ログを開いてください。ボタンは再度押せます。');
+      setDebug('カメラ起動で失敗。モデル以前の問題です。Safariのカメラ許可か、ブラウザ環境を確認してください。');
+      log('Camera start failed: '+msg);
+    }finally{
+      startInProgress=false;
+      setStartLoading(false);
+    }
+  }
+
+  function stopCamera(showStart=true){
+    running=false; detecting=false; stablePeace=0;
+    if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
+    video.srcObject=null;
+    stopBtn.disabled=true; switchBtn.disabled=true;
+    set(stateText,'停止'); set(gestureText,'未検出');
+    if(showStart) startLayer.style.display='flex';
+  }
+
+  async function switchCamera(){
+    facingMode = facingMode === 'user' ? 'environment' : 'user';
+    mirrored = facingMode === 'user';
+    video.style.transform = mirrored ? 'scaleX(-1)' : 'none';
+    set(stateText,'切替中');
+    await startCamera();
+  }
+
+  async function loadModelManually(){
+    clearError();
+    try{
+      await createHandLandmarker();
+      setDebug('モデル再読込成功。カメラが起動していればピース認識を開始します。');
+      if(running) detectLoop();
+    }catch(e){
+      showError('モデル再読込失敗。\n\n' + (e.message || String(e)).slice(0,3000));
+      setDebug('再読込にも失敗。診断ログを確認。CDNかWASMかモデル.taskのどれかが読めていません。');
+    }
+  }
+
+  function bindTap(el, fn){
+    let last=0;
+    const handler=ev=>{
+      if(ev){ ev.preventDefault(); ev.stopPropagation(); }
+      const n=performance.now();
+      if(n-last<280) return;
+      last=n;
+      fn();
+    };
+    el.addEventListener('click',handler);
+    el.addEventListener('pointerup',handler);
+    el.addEventListener('touchend',handler,{passive:false});
+  }
+
+  bindTap(startBtn,startCamera);
+  bindTap(testBtn,testFire);
+  bindTap(soundBtn,()=>{ ensureAudio(); playBeamSound(.65); setDebug('音を有効化しました。iPhoneではユーザー操作後でないと音が出ません。'); });
+  bindTap(loadModelBtn,loadModelManually);
+  bindTap(logBtn,()=>{ logPanel.style.display = logPanel.style.display === 'none' ? 'block' : 'none'; });
+  bindTap(stopBtn,()=>stopCamera(true));
+  bindTap(switchBtn,switchCamera);
+
+  window.addEventListener('resize',resizeCanvas);
+  resizeCanvas();
+  animate();
+  log('App booted. protocol='+location.protocol+' userAgent='+navigator.userAgent);
+})();
+</script>
+</body>
+</html>
